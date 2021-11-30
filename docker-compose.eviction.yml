@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  redis-volatile-lru:
+    image: redis:6.2
+    ports:
+      - "6380:6379"
+    command: redis-server /usr/local/etc/redis/redis.conf 
+    volumes:
+      - ./services/redis/redis.volatile-lru.conf:/usr/local/etc/redis/redis.conf
+
+  redis-allkeys-lru:
+    image: redis:6.2
+    ports:
+      - "6381:6379"
+    command: redis-server /usr/local/etc/redis/redis.conf 
+    volumes:
+      - ./services/redis/redis.allkeys-lru.conf:/usr/local/etc/redis/redis.conf
+
+  redis-volatile-lfu:
+    image: redis:6.2
+    ports:
+      - "6382:6379"
+    command: redis-server /usr/local/etc/redis/redis.conf 
+    volumes:
+      - ./services/redis/redis.volatile-lfu.conf:/usr/local/etc/redis/redis.conf
+
+  redis-allkeys-lfu:
+    image: redis:6.2
+    ports:
+      - "6383:6379"
+    command: redis-server /usr/local/etc/redis/redis.conf 
+    volumes:
+      - ./services/redis/redis.allkeys-lfu.conf:/usr/local/etc/redis/redis.conf
+
+  redis-volatile-random:
+    image: redis:6.2
+    ports:
+      - "6384:6379"
+    command: redis-server /usr/local/etc/redis/redis.conf 
+    volumes:
+      - ./services/redis/redis.volatile-random.conf:/usr/local/etc/redis/redis.conf
+
+  redis-allkeys-random:
+    image: redis:6.2
+    ports:
+      - "6385:6379"
+    command: redis-server /usr/local/etc/redis/redis.conf 
+    volumes:
+      - ./services/redis/redis.allkeys-random.conf:/usr/local/etc/redis/redis.conf
+
+  redis-volatile-ttl:
+    image: redis:6.2
+    ports:
+      - "6386:6379"
+    command: redis-server /usr/local/etc/redis/redis.conf 
+    volumes:
+      - ./services/redis/redis.volatile-ttl.conf:/usr/local/etc/redis/redis.conf
+
+  redis-noeviction:
+    image: redis:6.2
+    ports:
+      - "6387:6379"
+    command: redis-server /usr/local/etc/redis/redis.conf 
+    volumes:
+      - ./services/redis/redis.noeviction.conf:/usr/local/etc/redis/redis.conf
