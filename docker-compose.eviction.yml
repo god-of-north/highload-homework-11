@@ -1,6 +1,20 @@
 version: '3.8'
 
 services:
+  eviction-test:
+    build:
+      context: ./services/eviction-test
+      dockerfile: Dockerfile
+    depends_on:
+      - redis-volatile-lru
+      - redis-allkeys-lru
+      - redis-volatile-lfu
+      - redis-allkeys-lfu
+      - redis-volatile-random
+      - redis-allkeys-random
+      - redis-volatile-ttl
+      - redis-noeviction
+
   redis-volatile-lru:
     image: redis:6.2
     ports:
