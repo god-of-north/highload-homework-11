@@ -11,6 +11,7 @@ Scope:
 git clone https://github.com/god-of-north/highload-homework-11.git
 cd highload-homework-11
 docker-compose -f docker-compose.eviction.yml build
+docker-compose -f docker-compose.probabalistic-cache.yml build
 ```
 
 ## Eviction testing
@@ -215,4 +216,44 @@ noeviction -> Don't evict anything, just return an error on write operations.
     data15          0    19:44:02.063572      19       1
     data16          0    19:44:02.326513      16       1
 OOM command not allowed when used memory > 'maxmemory'.
+```
+
+## Caching library
+
+There are two ways for implemet caching using this library:
+- using decorator
+- using class method
+
+Decorator case:
+```
+# append decorator to your function
+@cache(redis, 30, 1.0)
+def upper_cached(word:str):
+    return word.upper()
+
+# than call your fuction
+ret = upper_cached(text)
+print(ret)
+```
+
+Class method case:
+```
+def upper(word:str):
+    return word.upper()
+
+redis = Redis(host = 'redis', port = 6379, db = 1)
+ret = redis.get_cached(text, lambda: upper(text), 30)
+print(res)
+```
+
+## Redis master-slave cluster
+
+Running container
+```
+docker-compose -f docker-compose.cluster.yml up
+```
+
+Slave started with
+```
+redis-server --slaveof redis-master 6379
 ```

@@ -1,147 +1,100 @@
-import redis
 import json
-from pprint import pprint
-import redis_lock
 from time import sleep 
 from datetime import datetime
 import threading
-from dataclasses import dataclass
 from math import log, ceil
-from random import random
-import psycopg2
-import signal
+from random import random, randint
 import hashlib
 
-def request2key(request: str):
-    return 'q:'+hashlib.sha1(str.encode('utf-8')).hexdigest()
+import redis
+import redis_lock
 
-def load_from_db(request: str):
-    print('recalc', flush=True)
-    ret = {}
-    conn = None
-    try:
-        conn = psycopg2.connect(database="pagila", user="hello_flask", password="hello_flask", host="db", port=5432)
-        with conn.cursor() as cur:
-            cur.execute(request)
-            all = cur.fetchall()
-            ret = dict.fromkeys(range(len(all)), all)
-    finally:
-        if conn:
-            conn.close()
+class Redis(redis.Redis):
+    def __init__(self, *args, **kwargs):
+        super(Redis, self).__init__(*args, **kwargs)
 
-    return ret
+    def get_cached(self, name, func, exp, beta = 1.0):
+        return cache_it(self, name, func, None, exp, beta)
 
-def recalc(request: str, ttl: int, conn: redis.Redis):
-    data_key = request2key(request)
-    lock = redis_lock.Lock(conn, data_key)
-    if lock.acquire(blocking=False):
-        print('from db', flush=True)
-        try:
-            t = datetime.now()
-            data = load_from_db(request)
-            ct = str(ceil((datetime.now()-t).total_seconds()))
-            conn.hset(data_key, 'data', json.dumps(data))
-            conn.hset(data_key, 'ct', str(ct))
-            conn.hset(data_key, 'q', request)
-            conn.expire(data_key, ttl)
-            lock.release()
-            return data
-        except Exception as e:
-            print(e, flush=True)
-            lock.release()
-    return None
+def cache(conn, exp, beta):
+    def func_decorator(func):
+        def wrap(*args, **kwargs):
+            params = (args, kwargs)
+            key = hashlib.sha1( (func.__name__ + json.dumps( args + tuple(sorted(kwargs.items())))).encode('utf-8') ).hexdigest()
 
+            result = cache_it(conn, key, func, params, exp, beta)
+            
+            return result
+        return wrap
+    return func_decorator
 
-def get_data(request: str, ttl: int, conn: redis.Redis):
-    beta = 1.0
-    data_key = request2key(request)
-    data = conn.hget(data_key, 'data')
+def cache_it(conn: redis.Redis, key, func, params, exp, beta = 1.0):
+    data = conn.hgetall(key)
     if data:
-        print('from cache |', conn.ttl(data_key), '|', float(conn.hget(data_key, 'ct')), flush=True)
+        ttl = conn.ttl(key)
+        computeTime = float(data[b'ct'])
+        data = data[b'data']
         
-        computeTime = float(conn.hget(data_key, 'ct'))
-        ttl = conn.ttl(data_key)
+        print('from cache |', key, '|', ttl, '|', computeTime, flush=True)
         
         if ceil(beta * (- log(random())) * computeTime) > ttl:
-            r = threading.Thread(name='recalc', target=lambda: recalc(request, ttl, conn))
+            print('>', key, 'probablistic trigger', flush=True)
+            r = threading.Thread(name='recalc', target=lambda: recalc(func, params, key, exp, conn))
             r.start()
-        return json.loads(data)
+
+        return data
     else:
-        data = recalc(request, ttl, conn)
+        data = recalc(func, params, key, exp, conn)
         if data:
             return data
         else:
             print('wait lock', flush=True)
             for _ in range(20):
                 sleep(0.5)
-                data = conn.hget(data_key, 'data')
+                data = conn.hget(key, 'data')
                 if data:
                     return json.loads(data)
             #timeout
             print('lock timeout', flush=True)
-            return get_data(request, ttl, conn)
+            return cache_it(conn, key, func, params, exp, beta)
 
+def recalc(func, params, key: str, exp: int, conn: redis.Redis):
+    lock = redis_lock.Lock(conn, key)
+    if lock.acquire(blocking=False):
+        print('from db', flush=True)
+        try:
+            t = datetime.now()
+            if params:
+                data = func(*params[0], **params[1])
+            else:
+                data = func()
+            ct = str(ceil((datetime.now()-t).total_seconds()))
 
-def get_data_x(request: str, ttl: int, conn: redis.Redis):
-    data_key = request2key(request)
-    data = conn.hget(data_key, 'data')
-    if data:
-        print('from cache |', conn.ttl(data_key), '|', conn.hget(data_key, 'ct'), flush=True)
-        return json.loads(data)
-    else:
-        r = recalc(request, ttl, conn)
-        if r:
-            return r
-        else:
-            print('wait lock', flush=True)
-            for _ in range(20):
-                sleep(0.5)
-                data = conn.hget(data_key, 'data')
-                if data:
-                    return json.loads(data)
-            #timeout
-            print('lock timeout', flush=True)
-            return get_data_x(request, ttl, conn)
-
-
-class GracefulKiller:
-    kill_now = False
-    def __init__(self):
-        signal.signal(signal.SIGINT, self.exit_gracefully)
-        signal.signal(signal.SIGTERM, self.exit_gracefully)
-
-    def exit_gracefully(self, *args):
-        self.kill_now = True
-
-def cache_updater(expire: int):
-    beta = 1.0
-    conn = redis.Redis(host = 'redis', port = 6379, db = 1)
-    killer = GracefulKiller()
-    while not killer.kill_now:
-        sleep(1)
-        keys = conn.keys(pattern='q:*')
-        for key in keys:
-            if not key.startswith(b'q:'):
-                continue
-            ct = conn.hget(key, 'ct')
-            if ct == None:
-                continue
-            q = conn.hget(key, 'q')
-            if q == None:
-                continue
-            computeTime = float(ct)
-            ttl = conn.ttl(key)
-            p = ceil(beta * (- log(random())) * computeTime)
-            print(key, '|', p, '>', ttl, ':', p>ttl, flush=True)
-            if p > ttl:
-                r = threading.Thread(name='recalc', target=lambda: recalc(q.decode("utf-8", "ignore"), expire, conn))
-                r.start()
-
-
-def run_cache_updater():
-    b = threading.Thread(name='cache_updater', target=cache_updater)
-    b.start()
-
+            p = conn.pipeline()
+            p.hset(key, 'data', data)
+            p.hset(key, 'ct', str(ct))
+            p.expire(key, exp)
+            p.execute()
+            
+            return data
+        except Exception as e:
+            print(e, flush=True)
+        finally:
+            lock.release()
+    return None
 
 if __name__ == '__main__':
-    cache_updater(30)
+
+    r = redis.Redis(host='localhost', port='6379', db=1)
+
+    @cache(conn=r, exp=10, beta=1.0)
+    def read_from_db(query, db):
+        print(f'---reading from db simulation: {db}:{query}')
+        sleep(1)
+        return query
+
+    for i in range(100):
+        data = str(randint(1,9))*5
+        res = read_from_db(data, 'db')
+        print('@', i, ':', data, '->', res)
+
