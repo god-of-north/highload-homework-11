@@ -41,6 +41,12 @@ class TestRedisEviction():
                 row[4] = False
             print("{: >10} {: >10} {: >18} {: >7} {: >7}".format(*row), flush=True)
 
+    def update_ttl(self):
+        keys = self.r.keys()
+        for row in self.all_keys:
+            if bytes(row[0], 'ascii') not in keys:
+                continue
+            row[3] = self.r.ttl(row[0])
 
     def run_test(self, evicted_count):
         for i in range(1000):
@@ -48,7 +54,8 @@ class TestRedisEviction():
             sleep(0.25)
             for _ in range(5):
                 self.read_random_key()
-            
+            self.update_ttl()
+
             if self.is_evicted():
                 evicted_count -= 1
             if evicted_count == 0:
